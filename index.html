@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>canba お絵かき帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: full-bleed drawing sheet, tool rail docked at the bottom like a pencil tray */
+:root {
+  --bg: #e8ecf1;
+  --sheet: #ffffff;
+  --grid: #dfe5ee;
+  --ink: #1d2733;
+  --muted: #687586;
+  --tray: #f7f9fc;
+  --line: #cfd7e2;
+  --accent: #2f5bd3;
+  --accent-ink: #ffffff;
+  --font-ui: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic", system-ui, sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c; --sheet: #ffffff; --grid: #dfe5ee; --ink: #e6ebf2; --muted: #8e9aab;
+    --tray: #202733; --line: #313b49; --accent: #7d9cff; --accent-ink: #0f1420; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161c; --sheet: #ffffff; --grid: #dfe5ee; --ink: #e6ebf2; --muted: #8e9aab;
+  --tray: #202733; --line: #313b49; --accent: #7d9cff; --accent-ink: #0f1420; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui);
+  display: flex; flex-direction: column; overflow: hidden;
+  padding-inline: 16px; padding-block: 12px;
+  gap: 12px;
+}
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 1.15rem; margin: 0; font-weight: 700; letter-spacing: .02em; }
+h1 small { font-weight: 500; color: var(--muted); font-size: .8rem; margin-left: .5em; }
+.status { font-family: var(--font-num); font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.stage {
+  position: relative; flex: 1; min-height: 0;
+  background: var(--sheet);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; touch-action: none;
+}
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#preview { pointer-events: none; }
+.stage[data-tool="pen"], .stage[data-tool="line"], .stage[data-tool="rect"], .stage[data-tool="ellipse"] { cursor: crosshair; }
+.stage[data-tool="eraser"] { cursor: cell; }
+
+.tray {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  background: var(--tray); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.group-label { font-size: .7rem; color: var(--muted); letter-spacing: .08em; margin-right: 2px; }
+button.tool, button.act {
+  font: inherit; font-size: .85rem; color: var(--ink);
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  min-width: 40px; height: 36px; padding: 0 10px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+button.tool:hover, button.act:hover { border-color: var(--muted); }
+button.tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .4; cursor: default; }
+svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.swatch {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--tray);
+  box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0;
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+input[type="color"] { width: 32px; height: 32px; border: none; background: none; padding: 0; cursor: pointer; }
+input[type="range"] { width: 110px; accent-color: var(--accent); }
+.size-val { font-family: var(--font-num); font-size: .75rem; width: 3ch; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spacer { flex: 1; }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--ink); color: var(--sheet); padding: 8px 14px; border-radius: 10px; font-size: .85rem;
+  opacity: 0; transition: opacity .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+
+.overlay { position: fixed; inset: 0; background: rgb(0 0 0 / .5); display: grid; place-items: center; padding: 16px; }
+.dialog { background: var(--tray); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; max-width: min(720px, 100%); display: grid; gap: 12px; }
+.dialog p { margin: 0; font-size: .9rem; }
+.dialog img { max-width: 100%; max-height: 60vh; border-radius: 8px; border: 1px solid var(--line); background: var(--sheet); }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+@media (max-width: 520px) {
+  input[type="range"] { width: 80px; }
+  .group-label { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>canba<small>お絵かき帳</small></h1>
+  <span class="status" id="status">0 ストローク</span>
+</header>
+
+<div class="stage" id="stage" data-tool="pen">
+  <canvas id="board"></canvas>
+  <canvas id="preview"></canvas>
+</div>
+
+<div class="tray" role="toolbar" aria-label="描画ツール">
+  <div class="group" id="tools">
+    <span class="group-label">道具</span>
+    <button class="tool" data-tool="pen" aria-pressed="true" title="ペン (P)"><svg class="i" viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></button>
+    <button class="tool" data-tool="eraser" aria-pressed="false" title="消しゴム (E)"><svg class="i" viewBox="0 0 24 24"><path d="M7 20h12M5 15l9-9 5 5-8 8H8z"/></svg></button>
+    <button class="tool" data-tool="line" aria-pressed="false" title="直線 (L)"><svg class="i" viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
+    <button class="tool" data-tool="rect" aria-pressed="false" title="四角 (R)"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+    <button class="tool" data-tool="ellipse" aria-pressed="false" title="丸 (O)"><svg class="i" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
+  </div>
+
+  <div class="group" id="colors">
+    <span class="group-label">色</span>
+  </div>
+
+  <div class="group">
+    <span class="group-label">太さ</span>
+    <input type="range" id="size" min="1" max="48" value="6" aria-label="線の太さ">
+    <span class="size-val" id="sizeVal">6</span>
+  </div>
+
+  <span class="spacer"></span>
+
+  <div class="group">
+    <button class="act" id="undo" title="元に戻す (Ctrl+Z)"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
+    <button class="act" id="redo" title="やり直す (Ctrl+Shift+Z)"><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
+    <button class="act" id="clear">全部消す</button>
+    <button class="act" id="save">画像にする</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<div class="overlay" id="overlay" hidden></div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const board = document.getElementById('board');
+  const preview = document.getElementById('preview');
+  const bctx = board.getContext('2d');
+  const pctx = preview.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const sizeEl = document.getElementById('size');
+  const sizeVal = document.getElementById('sizeVal');
+  const undoBtn = document.getElementById('undo');
+  const redoBtn = document.getElementById('redo');
+  const toastEl = document.getElementById('toast');
+  const overlay = document.getElementById('overlay');
+
+  const PALETTE = ['#1d2733', '#e2463b', '#f2a20c', '#2aa76b', '#2f5bd3', '#8b4fd1', '#ff7eb6'];
+  const state = { tool: 'pen', color: PALETTE[0], size: 6 };
+  // Strokes are stored in CSS-pixel coordinates so the drawing survives resizes.
+  let strokes = [];
+  let redoStack = [];
+  let current = null;
+
+  // ---- colors
+  const colorsEl = document.getElementById('colors');
+  PALETTE.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = 'swatch'; b.style.background = c;
+    b.setAttribute('aria-label', '色 ' + c);
+    b.setAttribute('aria-pressed', i === 0 ? 'true' : 'false');
+    b.addEventListener('click', () => setColor(c));
+    colorsEl.appendChild(b);
+  });
+  const picker = document.createElement('input');
+  picker.type = 'color'; picker.id = 'picker'; picker.value = PALETTE[0];
+  picker.setAttribute('aria-label', '好きな色');
+  picker.addEventListener('input', () => setColor(picker.value));
+  colorsEl.appendChild(picker);
+
+  function setColor(c) {
+    state.color = c;
+    colorsEl.querySelectorAll('.swatch').forEach(s =>
+      s.setAttribute('aria-pressed', String(s.style.background && rgbToHex(s.style.background) === c.toLowerCase())));
+    if (state.tool === 'eraser') setTool('pen');
+  }
+  function rgbToHex(rgb) {
+    const m = rgb.match(/\d+/g); if (!m) return rgb;
+    return '#' + m.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('');
+  }
+
+  // ---- tools
+  const toolButtons = document.querySelectorAll('button.tool');
+  toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  function setTool(t) {
+    state.tool = t; stage.dataset.tool = t;
+    toolButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  }
+  sizeEl.addEventListener('input', () => { state.size = +sizeEl.value; sizeVal.textContent = sizeEl.value; });
+
+  // ---- sizing
+  let W = 0, H = 0;
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    W = r.width; H = r.height;
+    for (const c of [board, preview]) {
+      c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+      c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    redraw();
+  }
+  new ResizeObserver(resize).observe(stage);
+
+  // ---- drawing
+  function drawStroke(ctx, s) {
+    if (s.tool === 'clear') { ctx.clearRect(0, 0, W, H); return; }
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = s.size;
+    if (s.tool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = '#000';
+    } else {
+      ctx.strokeStyle = s.color;
+    }
+    const p = s.points;
+    ctx.beginPath();
+    if (s.tool === 'pen' || s.tool === 'eraser') {
+      if (p.length === 1) {
+        ctx.arc(p[0].x, p[0].y, s.size / 2, 0, Math.PI * 2);
+        ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+      } else {
+        // Quadratic smoothing through midpoints.
+        ctx.moveTo(p[0].x, p[0].y);
+        for (let i = 1; i < p.length - 1; i++) {
+          const mx = (p[i].x + p[i + 1].x) / 2, my = (p[i].y + p[i + 1].y) / 2;
+          ctx.quadraticCurveTo(p[i].x, p[i].y, mx, my);
+        }
+        const last = p[p.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+      }
+    } else {
+      const a = p[0], b = p[p.length - 1];
+      if (s.tool === 'line') { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      else if (s.tool === 'rect') { ctx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y)); }
+      else if (s.tool === 'ellipse') {
+        ctx.ellipse((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2, 0, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function redraw() {
+    bctx.clearRect(0, 0, W, H);
+    strokes.forEach(s => drawStroke(bctx, s));
+    updateUI();
+  }
+  function updateUI() {
+    undoBtn.disabled = strokes.length === 0;
+    redoBtn.disabled = redoStack.length === 0;
+    statusEl.textContent = visibleCount() + ' ストローク';
+  }
+  function visibleCount() {
+    const i = strokes.map(s => s.tool).lastIndexOf('clear');
+    return strokes.length - i - 1;
+  }
+
+  function pos(e) {
+    const r = stage.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  stage.addEventListener('pointerdown', e => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    stage.setPointerCapture(e.pointerId);
+    current = { tool: state.tool, color: state.color, size: state.size, points: [pos(e)] };
+    renderCurrent();
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!current) return;
+    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    if (current.tool === 'pen' || current.tool === 'eraser') {
+      for (const ev of events) current.points.push(pos(ev));
+    } else {
+      current.points[1] = pos(e);
+    }
+    renderCurrent();
+  });
+  const finish = () => {
+    if (!current) return;
+    strokes.push(current); redoStack = [];
+    current = null;
+    pctx.clearRect(0, 0, W, H);
+    redraw();
+  };
+  stage.addEventListener('pointerup', finish);
+  stage.addEventListener('pointercancel', finish);
+
+  function renderCurrent() {
+    pctx.clearRect(0, 0, W, H);
+    if (current.tool === 'eraser') {
+      // Erase live on the board copy so the user sees the effect immediately.
+      bctx.clearRect(0, 0, W, H);
+      strokes.forEach(s => drawStroke(bctx, s));
+      drawStroke(bctx, current);
+    } else {
+      drawStroke(pctx, current);
+    }
+  }
+
+  // ---- actions
+  function undo() { if (strokes.length) { redoStack.push(strokes.pop()); redraw(); } }
+  function redo() { if (redoStack.length) { strokes.push(redoStack.pop()); redraw(); } }
+  undoBtn.addEventListener('click', undo);
+  redoBtn.addEventListener('click', redo);
+
+  document.getElementById('clear').addEventListener('click', () => {
+    if (!visibleCount()) return;
+    showDialog('全部消しますか？「元に戻す」で復活できます。', null, [
+      ['やめる', closeDialog],
+      ['消す', () => {
+        strokes.push({ tool: 'clear' }); redoStack = [];
+        redraw(); closeDialog(); toast('消しました');
+      }]
+    ]);
+  });
+
+  document.getElementById('save').addEventListener('click', () => {
+    const out = document.createElement('canvas');
+    out.width = board.width; out.height = board.height;
+    const o = out.getContext('2d');
+    o.fillStyle = getComputedStyle(stage).backgroundColor || '#fff';
+    o.fillRect(0, 0, out.width, out.height);
+    o.drawImage(board, 0, 0);
+    const url = out.toDataURL('image/png');
+    const img = new Image(); img.src = url; img.alt = '描いた絵';
+    showDialog('画像を長押し、または右クリックで保存できます。', img, [
+      ['ダウンロード', () => {
+        const a = document.createElement('a'); a.href = url; a.download = 'canba.png'; a.click();
+      }],
+      ['閉じる', closeDialog]
+    ]);
+  });
+
+  function showDialog(text, media, buttons) {
+    overlay.innerHTML = '';
+    const d = document.createElement('div'); d.className = 'dialog'; d.setAttribute('role', 'dialog');
+    const p = document.createElement('p'); p.textContent = text; d.appendChild(p);
+    if (media) d.appendChild(media);
+    const row = document.createElement('div'); row.className = 'row';
+    buttons.forEach(([label, fn]) => {
+      const b = document.createElement('button'); b.className = 'act'; b.textContent = label;
+      b.addEventListener('click', fn); row.appendChild(b);
+    });
+    d.appendChild(row); overlay.appendChild(d); overlay.hidden = false;
+    row.lastChild.focus();
+  }
+  function closeDialog() { overlay.hidden = true; overlay.innerHTML = ''; }
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeDialog(); });
+
+  let toastTimer;
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1400);
+  }
+
+  // ---- keyboard
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+    if (e.key === 'Escape') { closeDialog(); return; }
+    const map = { p: 'pen', e: 'eraser', l: 'line', r: 'rect', o: 'ellipse' };
+    if (map[k] && !e.ctrlKey && !e.metaKey) setTool(map[k]);
+    if (k === '[') { sizeEl.value = Math.max(1, state.size - 2); sizeEl.dispatchEvent(new Event('input')); }
+    if (k === ']') { sizeEl.value = Math.min(48, state.size + 2); sizeEl.dispatchEvent(new Event('input')); }
+  });
+
+  // ---- sample doodle so the sheet isn't blank on first open
+  function seed() {
+    const r = stage.getBoundingClientRect();
+    const cx = r.width / 2, cy = r.height / 2;
+    const s = Math.min(r.width, r.height) / 6;
+    const circle = (x, y, rad, n = 40) => Array.from({ length: n + 1 }, (_, i) => {
+      const t = (i / n) * Math.PI * 2; return { x: x + Math.cos(t) * rad, y: y + Math.sin(t) * rad };
+    });
+    strokes = [
+      { tool: 'ellipse', color: '#f2a20c', size: 5, points: [{ x: cx - s, y: cy - s }, { x: cx + s, y: cy + s }] },
+      { tool: 'pen', color: '#1d2733', size: 6, points: circle(cx - s * .35, cy - s * .25, 2, 8) },
+      { tool: 'pen', color: '#1d2733', size: 6, points: circle(cx + s * .35, cy - s * .25, 2, 8) },
+      { tool: 'pen', color: '#e2463b', size: 5, points: Array.from({ length: 21 }, (_, i) => {
+        const t = Math.PI * (0.15 + 0.7 * i / 20); return { x: cx + Math.cos(t) * s * .5, y: cy + Math.sin(t) * s * .5 };
+      }) },
+      { tool: 'pen', color: '#ff7eb6', size: 10, points: [{ x: cx - s * .65, y: cy + s * .15 }] },
+      { tool: 'pen', color: '#ff7eb6', size: 10, points: [{ x: cx + s * .65, y: cy + s * .15 }] },
+    ];
+    redraw();
+  }
+  requestAnimationFrame(() => { resize(); seed(); toast('自由に描いてみてね'); });
+})();
+</script>
+</body>
+</html>
